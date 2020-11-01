@@ -9,6 +9,7 @@ import numpy as np
 import spacy
 import random
 from torch.utils.tensorboard import SummaryWriter
+from torchtext.data.metrics import bleu_score
 
 spacy_ger = spacy.load("de")
 spacy_eng = spacy.load("en")
@@ -105,9 +106,27 @@ class Seq2Seq(nn.Module):
 
         return outputs
 
+
+
+def bleu(data, model, german, english, device):
+    targets = []
+    outputs = []
+
+    for example in data:
+        src = vars(example)["src"]
+        trg = vars(example)["trg"]
+
+        prediction = translate_sentence(model, src, german, english, device)
+        prediction = prediction[:-1]  # remove <eos> token
+
+        targets.append([trg])
+        outputs.append(prediction)
+
+    return bleu_score(outputs, targets)
+
 ### ready to to the training the model ###
 # training hyperparameters
-num_epochs = 20
+num_epochs = 5
 learning_rate = 0.001
 batch_size = 64
 
@@ -148,12 +167,9 @@ pad_idx = english.vocab.stoi["<pad>"]
 criterion = nn.CrossEntropyLoss(ignore_index=pad_idx)
 
 for epoch in range(num_epochs):
-    print(f"{epoch}/{num_epochs}")
-
     for batch_idx, batch in enumerate(train_iterator):
         inp_data = batch.src.to(device)
         target = batch.trg.to(device)
-
         output = model(inp_data, target)
         # output shape: (trg_len, batch_size, output_dim)
         # (N, 10) and targets would be (N)
@@ -161,9 +177,9 @@ for epoch in range(num_epochs):
         output = output[1:].reshape(-1, output.shape[2])
         target = target[1:].reshape(-1)
 
-        optimizer.zero_grad()
         loss = criterion(output, target)
 
+        optimizer.zero_grad()
         loss.backward()
 
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1)
@@ -172,6 +188,7 @@ for epoch in range(num_epochs):
         writer.add_scalar("training loss", loss, global_step=step)
         step += 1
 
+        print(f"Epoch {epoch + 1}/{num_epochs}, Train loss: {loss.item():.4f}")
 
-
-
+score = bleu(test_data[1:100], model, german, english, device)
+print(f"Bleu score {score*100:.2f}")
